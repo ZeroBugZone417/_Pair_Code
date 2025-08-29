@@ -13,6 +13,7 @@ const {
 const { upload } = require('./mega');
 
 let router = express.Router();
+const PM2_NAME = "DANUWA-MD"; // consistent process name
 
 // --- Helper: remove file/folder safely ---
 function removeFile(FilePath) {
@@ -40,7 +41,10 @@ router.get('/', async (req, res) => {
             let DanuwaPairWeb = makeWASocket({
                 auth: {
                     creds: state.creds,
-                    keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
+                    keys: makeCacheableSignalKeyStore(
+                        state.keys,
+                        pino({ level: "fatal" }).child({ level: "fatal" })
+                    ),
                 },
                 printQRInTerminal: false,
                 logger: pino({ level: "fatal" }).child({ level: "fatal" }),
@@ -53,7 +57,7 @@ router.get('/', async (req, res) => {
                 num = num.replace(/[^0-9]/g, '');
                 const code = await DanuwaPairWeb.requestPairingCode(num);
                 if (!res.headersSent) {
-                    res.send({ code });
+                    return res.send({ code });
                 }
             }
 
@@ -66,7 +70,7 @@ router.get('/', async (req, res) => {
 
                 if (connection === "open") {
                     try {
-                        await delay(10000);
+                        await delay(8000);
 
                         const auth_path = './session/';
                         const user_jid = jidNormalizedUser(DanuwaPairWeb.user.id);
@@ -80,13 +84,13 @@ router.get('/', async (req, res) => {
 
                         await DanuwaPairWeb.sendMessage(user_jid, { text: sid });
 
+                        // cleanup session after success
+                        removeFile('./session');
+
                     } catch (e) {
                         console.error("Error in open connection:", e);
-                        exec('pm2 restart danuwa');
+                        exec(`pm2 restart ${PM2_NAME}`);
                     }
-
-                    await delay(100);
-                    removeFile('./session'); // cleanup session safely
                     return;
                 }
 
@@ -99,11 +103,10 @@ router.get('/', async (req, res) => {
 
         } catch (err) {
             console.error("Main error:", err);
-            exec('pm2 restart danuwa-md');
-            DanuwaPair();
+            exec(`pm2 restart ${PM2_NAME}`);
             removeFile('./session');
             if (!res.headersSent) {
-                res.send({ code: "Service Unavailable" });
+                res.status(503).send({ code: "Service Unavailable" });
             }
         }
     }
@@ -114,7 +117,7 @@ router.get('/', async (req, res) => {
 // --- Global error catcher ---
 process.on('uncaughtException', function (err) {
     console.error('Caught exception:', err);
-    exec('pm2 restart danuwa');
+    exec(`pm2 restart ${PM2_NAME}`);
 });
 
 module.exports = router;
